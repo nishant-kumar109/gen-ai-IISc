@@ -1,9 +1,40 @@
-# Gen AI IISc
+# Generative AI — Principles and Applications (IISc CCE)
 
-Course materials and quizzes from a Generative AI course at IISc (Indian Institute of Science).
+Course materials, quizzes, and (soon) projects from the **Generative AI – Principles and
+Applications** Proficience course at the **Indian Institute of Science (IISc), Centre for
+Continuing Education (CCE)**.
+
+- **Course:** Generative AI – Principles and Applications (3:0)
+- **Term:** May – July 2026
+- **Instructor:** Dr. Prathosh A P, Dept. of Electrical Communication Engineering (ECE), IISc
+
+## Course overview
+
+An in-depth, mathematically grounded study of **deep generative models** and their learning
+algorithms, with hands-on implementation in **PyTorch**. Topics covered:
+
+- **Probabilistic foundations** — variational inference, variational divergence minimization, f-divergences
+- **Latent-variable & adversarial models** — VAEs, VQ-VAE, GANs, WGANs
+- **Diffusion models** — DDPMs, conditional & score-based models, classifier-free guidance, latent diffusion / DDIM
+- **Sequence models & LLMs** — autoregressive models, Transformers & attention, token sampling, quantization, State Space Models (S4, Mamba)
+- **Alignment & RL** — RLHF, reward models, PPO, DPO
 
 ## Contents
 
-- **Quizzes**
-  - [Quiz 1](quizes/quiz-1.md)
-  - [Quiz 2](quizes/quiz-2.md)
+### Quizzes
+- [Quiz 1](quizes/quiz-1.md) — Probability Foundations for Machine Learning
+- [Quiz 2](quizes/quiz-2.md) — Probability, Random Variables & Learning Objectives
+- [Quiz 3](quizes/quiz-3.md) — Vanilla GANs
+- [Quiz 4](quizes/quiz-4.md) — Latent Variable Models & Encoder–Decoder Architectures
+- [Quiz 5](quizes/quiz-5.md) — Variational Autoencoders (VAEs)
+- [Quiz 6](quizes/quiz-6.md) — VAEs, VQ-VAE & Model Generalization
+
+## Roadmap
+
+Currently this repo holds the **quizzes**. Planned additions:
+
+- 📓 **Notes** — chapter-wise study notes for the course
+- 🛠️ **Projects** — course capstone / hands-on implementations (diffusion, VAE, LLM alignment, etc.)
+- 📄 **References** — syllabus, reading lists, and supporting material
+
+> Notes and quizzes are self-prepared study aids based on lectures by Dr. Prathosh A P (IISc CCE).
