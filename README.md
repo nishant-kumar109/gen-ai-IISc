@@ -28,6 +28,8 @@ algorithms, with hands-on implementation in **PyTorch**. Topics covered:
 - [Quiz 4](quizes/quiz-4.md) — Latent Variable Models & Encoder–Decoder Architectures
 - [Quiz 5](quizes/quiz-5.md) — Variational Autoencoders (VAEs)
 - [Quiz 6](quizes/quiz-6.md) — VAEs, VQ-VAE & Model Generalization
+- [Quiz 7](quizes/quiz-7.md) — Autoregressive Models, Attention & Transformers
+- [Quiz 8](quizes/quiz-8.md) — Denoising Diffusion Probabilistic Models (DDPM)
 
 ### Projects
 - [Crowd-Driven Visual Generation with Conditional Diffusion Models](projects/crowd-driven-visual-generation/) — course capstone: generate one coherent artwork from thousands of aggregated crowd inputs via conditional latent diffusion. ([proposal](projects/crowd-driven-visual-generation/PROPOSAL.md) · [PDF](projects/crowd-driven-visual-generation/project-proposal-nishant.pdf)) — *proposal stage*
@@ -36,5 +38,5 @@ algorithms, with hands-on implementation in **PyTorch**. Topics covered:
 
 This repo currently holds the **quizzes** and the **first project proposal**.
 
-- ✅ **Quizzes** — 6 topic quizzes (probability → GANs → VAEs/VQ-VAE)
+- ✅ **Quizzes** — 8 topic quizzes (probability → GANs → VAEs/VQ-VAE → Transformers → diffusion)
 - 🛠️ **Projects** — *in progress:* Crowd-Driven Visual Generation (proposal done; implementation next).
