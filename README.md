@@ -29,12 +29,12 @@ algorithms, with hands-on implementation in **PyTorch**. Topics covered:
 - [Quiz 5](quizes/quiz-5.md) — Variational Autoencoders (VAEs)
 - [Quiz 6](quizes/quiz-6.md) — VAEs, VQ-VAE & Model Generalization
 
+### Projects
+- [Crowd-Driven Visual Generation with Conditional Diffusion Models](projects/crowd-driven-visual-generation/) — course capstone: generate one coherent artwork from thousands of aggregated crowd inputs via conditional latent diffusion. ([proposal](projects/crowd-driven-visual-generation/PROPOSAL.md) · [PDF](projects/crowd-driven-visual-generation/project-proposal-nishant.pdf)) — *proposal stage*
+
 ## Roadmap
 
-Currently this repo holds the **quizzes**. Planned additions:
+This repo currently holds the **quizzes** and the **first project proposal**.
 
-- 📓 **Notes** — chapter-wise study notes for the course
-- 🛠️ **Projects** — course capstone / hands-on implementations (diffusion, VAE, LLM alignment, etc.)
-- 📄 **References** — syllabus, reading lists, and supporting material
-
-> Notes and quizzes are self-prepared study aids based on lectures by Dr. Prathosh A P (IISc CCE).
+- ✅ **Quizzes** — 6 topic quizzes (probability → GANs → VAEs/VQ-VAE)
+- 🛠️ **Projects** — *in progress:* Crowd-Driven Visual Generation (proposal done; implementation next).
