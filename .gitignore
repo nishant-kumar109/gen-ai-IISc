@@ -1,1 +1,26 @@
 .DS_Store
+Thumbs.db
+
+# --- training artifacts / checkpoints (regenerate on Colab; keep out of git) ---
+runs/
+*.pt
+*.ckpt
+*.pth
+*.safetensors
+
+# --- downloaded data / caches ---
+_data/
+**/data/_cache/
+*.zip
+*.tar
+*.tar.gz
+
+# --- generated media (commit only figures you deliberately add) ---
+recon*.png
+samples*.png
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
