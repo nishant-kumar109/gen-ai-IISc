@@ -68,11 +68,22 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--limit", type=int, default=5000, help="max images (HF datasets)")
     p.add_argument("--image-col", default="image", help="image column (HF datasets)")
+    p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
+    p.add_argument("--wandb-project", default="crowd-driven-visual-generation")
     args = p.parse_args()
 
     device = pick_device(args.device)
     os.makedirs(args.out, exist_ok=True)
     print(f"device={device}  dataset={args.dataset}  out={args.out}")
+
+    wb = None
+    if args.wandb:
+        try:
+            import wandb as wb
+            wb.init(project=args.wandb_project, name="vae", config=vars(args))
+        except Exception as e:
+            print(f"[wandb] disabled: {e}")
+            wb = None
 
     dl = make_dataloader(args.dataset, image_size=args.image_size,
                          batch_size=args.batch, num_workers=args.workers,
@@ -103,6 +114,10 @@ def main() -> None:
                 running[k] += losses[k].item()
             seen += 1
             step += 1
+            if wb:
+                wb.log({"loss/total": losses["total"].item(),
+                        "loss/recon": losses["recon"].item(),
+                        "loss/kl": losses["kl"].item()}, step=step)
             if args.steps and (i + 1) >= args.steps:
                 break
         avg = {k: v / max(seen, 1) for k, v in running.items()}
@@ -120,6 +135,11 @@ def main() -> None:
     rec_path = save_reconstructions(vae, first_batch, os.path.join(args.out, "recon.png"), device)
     print(f"saved reconstructions → {rec_path}" if rec_path
           else "(torchvision not available — skipped reconstruction image)")
+
+    if wb:
+        if rec_path:
+            wb.log({"reconstructions": wb.Image(rec_path)})
+        wb.finish()
 
 
 if __name__ == "__main__":
