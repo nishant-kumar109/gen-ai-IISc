@@ -27,8 +27,20 @@ c = cluster_centroid(emb, k=4, mode="dominant")
 Smoke test: `python3 models/aggregation.py`. This completes the **input pipeline**
 (simulator → encode → aggregate).
 
+## ✅ `vae.py` (implemented)
+From-scratch convolutional VAE for the latent space — reparameterization trick + ELBO (β·KL).
+Default: 64×64 RGB → spatial latent `[4, 8, 8]` (8× downsample). Diffusion runs in this latent.
+
+```python
+from models.vae import ConvVAE
+vae = ConvVAE(beta=1.0)
+x_rec, mu, logvar, z = vae(x)            # x: [B,3,64,64]
+losses = vae.loss(x, x_rec, mu, logvar)  # {'total','recon','kl'}
+z = vae.encode_to_latent(x)              # for the diffusion pipeline
+```
+Shape self-test: `python3 models/vae.py` (verified: 4.58M params, z=[B,4,8,8]).
+
 ## Still to build
-- `vae.py` — VAE / VQ-VAE for the latent space (ELBO / codebook).
 - `diffusion.py` — conditional DDPM (U-Net), noise-prediction loss, classifier-free guidance, DDIM sampler.
 - `gan.py` — conditional GAN baseline.
 
