@@ -104,36 +104,52 @@ if _HAS_TORCH:
             x, _ = self.base[i]
             return x
 
-    def _hf_dataset(spec: str, image_size: int, split: str = "train", limit=None):
+    class _TensorDataset(Dataset):
+        def __init__(self, data):
+            self.data = data
+
+        def __len__(self):
+            return len(self.data)
+
+        def __getitem__(self, i):
+            return self.data[i]
+
+    def _hf_subset(spec, image_size, limit=5000, split="train", image_col="image"):
+        """Stream a HuggingFace image dataset and materialise the first ``limit``
+        images into memory. Streaming avoids downloading the whole set, and
+        materialising lets us do many epochs / shuffling. Returns [-1,1] images."""
         from datasets import load_dataset
-        from PIL import Image  # noqa: F401
 
-        ds = load_dataset(spec, split=split, streaming=False)
-        if limit:
-            ds = ds.select(range(min(limit, len(ds))))
-
-        class _HF(Dataset):
-            def __len__(self):
-                return len(ds)
-
-            def __getitem__(self, i):
-                img = ds[i]["image"].convert("RGB").resize((image_size, image_size))
-                t = torch.frombuffer(img.tobytes(), dtype=torch.uint8).float()
-                return t.view(image_size, image_size, 3).permute(2, 0, 1) / 255.0 * 2 - 1
-
-        return _HF()
+        print(f"streaming {spec!r} — first {limit} images...", flush=True)
+        try:
+            ds = load_dataset(spec, split=split, streaming=True, trust_remote_code=True)
+        except TypeError:
+            ds = load_dataset(spec, split=split, streaming=True)
+        imgs = []
+        for i, ex in enumerate(ds):
+            if i >= limit:
+                break
+            img = ex[image_col].convert("RGB").resize((image_size, image_size))
+            t = torch.frombuffer(img.tobytes(), dtype=torch.uint8).float()
+            imgs.append(t.view(image_size, image_size, 3).permute(2, 0, 1) / 255.0 * 2 - 1)
+        if not imgs:
+            raise RuntimeError(f"streamed 0 images from {spec!r}; check image_col={image_col!r}")
+        print(f"  materialised {len(imgs)} images", flush=True)
+        return _TensorDataset(torch.stack(imgs))
 
     # ------------------------------------------------------------------- #
-    def get_dataset(spec: str = "synthetic", image_size: int = 64, **kw):
-        """Dispatch a dataset by ``spec``."""
+    def get_dataset(spec: str = "synthetic", image_size: int = 64,
+                    limit: int = 5000, image_col: str = "image", split: str = "train"):
+        """Dispatch a dataset by ``spec``. (`limit`/`image_col`/`split` apply only
+        to HuggingFace ids.)"""
         if spec == "synthetic":
-            return SyntheticImageDataset(image_size=image_size, **kw)
+            return SyntheticImageDataset(image_size=image_size)
         if spec == "cifar10":
-            return _cifar10(image_size, **kw)
+            return _cifar10(image_size)
         if os.path.isdir(spec):
             return ImageFolderDataset(spec, image_size)
         # otherwise assume a HuggingFace dataset id
-        return _hf_dataset(spec, image_size, **kw)
+        return _hf_subset(spec, image_size, limit=limit, split=split, image_col=image_col)
 
     def make_dataloader(spec="synthetic", image_size=64, batch_size=64,
                         shuffle=True, num_workers=2, **kw):

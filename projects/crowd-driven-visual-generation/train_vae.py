@@ -66,6 +66,8 @@ def main() -> None:
     p.add_argument("--out", default="runs/vae")
     p.add_argument("--device", default="auto")
     p.add_argument("--workers", type=int, default=2)
+    p.add_argument("--limit", type=int, default=5000, help="max images (HF datasets)")
+    p.add_argument("--image-col", default="image", help="image column (HF datasets)")
     args = p.parse_args()
 
     device = pick_device(args.device)
@@ -73,7 +75,8 @@ def main() -> None:
     print(f"device={device}  dataset={args.dataset}  out={args.out}")
 
     dl = make_dataloader(args.dataset, image_size=args.image_size,
-                         batch_size=args.batch, num_workers=args.workers)
+                         batch_size=args.batch, num_workers=args.workers,
+                         limit=args.limit, image_col=args.image_col)
     vae = ConvVAE(latent_channels=args.latent_channels, base=args.base,
                   beta=args.beta).to(device)
     opt = torch.optim.Adam(vae.parameters(), lr=args.lr)
