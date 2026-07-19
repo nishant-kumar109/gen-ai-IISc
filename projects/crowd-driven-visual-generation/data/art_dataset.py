@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import time
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
@@ -126,12 +127,16 @@ if _HAS_TORCH:
         except TypeError:
             ds = load_dataset(spec, split=split, streaming=True)
         imgs = []
+        t0 = time.time()
         for i, ex in enumerate(ds):
             if i >= limit:
                 break
             img = ex[image_col].convert("RGB").resize((image_size, image_size))
             t = torch.frombuffer(img.tobytes(), dtype=torch.uint8).float()
             imgs.append(t.view(image_size, image_size, 3).permute(2, 0, 1) / 255.0 * 2 - 1)
+            if (i + 1) % 250 == 0:
+                rate = (i + 1) / max(time.time() - t0, 1e-6)
+                print(f"  {i + 1}/{limit} images ({rate:.0f}/s)", flush=True)
         if not imgs:
             raise RuntimeError(f"streamed 0 images from {spec!r}; check image_col={image_col!r}")
         print(f"  materialised {len(imgs)} images", flush=True)
