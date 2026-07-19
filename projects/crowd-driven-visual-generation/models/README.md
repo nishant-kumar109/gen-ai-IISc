@@ -40,8 +40,23 @@ z = vae.encode_to_latent(x)              # for the diffusion pipeline
 ```
 Shape self-test: `python3 models/vae.py` (verified: 4.58M params, z=[B,4,8,8]).
 
+## ✅ `diffusion.py` (implemented) — the generative core
+Conditional latent DDPM: a **FiLM-conditioned U-Net** (ε-prediction) + **cosine** schedule +
+**classifier-free-guidance** (condition-dropout at train, guided **DDIM** sampling with scale `w`).
+
+```python
+from models.diffusion import ConditionalUNet, GaussianDiffusion
+unet = ConditionalUNet(latent_channels=4, cond_dim=512)
+diff = GaussianDiffusion(unet, timesteps=1000, p_uncond=0.1)
+loss = diff.p_losses(z0, cond)                 # train: z0 [B,4,8,8], cond [B,512]
+z    = diff.ddim_sample((B,4,8,8), cond, w=3.0, steps=50)   # sample
+```
+Shape self-test: `python3 models/diffusion.py` (1.97M params).
+
+> **Training signal (per proposal §2):** the model is trained conditioned on each image's *own*
+> CLIP embedding; the crowd **aggregation** (`aggregation.py`) is applied only at **inference**.
+
 ## Still to build
-- `diffusion.py` — conditional DDPM (U-Net), noise-prediction loss, classifier-free guidance, DDIM sampler.
 - `gan.py` — conditional GAN baseline.
 
 Configs + fixed seeds live alongside each module for reproducibility.
