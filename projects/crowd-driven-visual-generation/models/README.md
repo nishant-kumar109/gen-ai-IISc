@@ -13,8 +13,21 @@ emb = HashingEncoder(dim=64).encode_crowd(crowd)   # -> [N, D] unit vectors
 ```
 Smoke test: `python3 models/encoders.py`.
 
+## ✅ `aggregation.py` (implemented) — the core contribution
+Four permutation-invariant strategies mapping a set of embeddings → one conditioning vector:
+- `mean_pool` · `cluster_centroid` — NumPy-optional, **run locally** (against HashingEncoder).
+- `AttentionPooling` (Set-Transformer PMA) · `DeepSets` — learnable `torch.nn` modules (**Colab**).
+
+```python
+from models.aggregation import mean_pool, cluster_centroid   # non-learnable
+c = mean_pool(emb)                       # emb: [N, D] -> conditioning vector [D]
+c = cluster_centroid(emb, k=4, mode="dominant")
+# learnable (Colab): AttentionPooling.build(in_dim, out_dim) / DeepSets.build(in_dim, ...)
+```
+Smoke test: `python3 models/aggregation.py`. This completes the **input pipeline**
+(simulator → encode → aggregate).
+
 ## Still to build
-- `aggregation.py` — permutation-invariant aggregators: mean-pool · cluster-centroid · Set-Transformer (PMA) · Deep-Sets.
 - `vae.py` — VAE / VQ-VAE for the latent space (ELBO / codebook).
 - `diffusion.py` — conditional DDPM (U-Net), noise-prediction loss, classifier-free guidance, DDIM sampler.
 - `gan.py` — conditional GAN baseline.
