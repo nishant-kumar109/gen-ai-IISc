@@ -18,6 +18,7 @@ matplotlib>=3.8
 sentence-transformers>=2.6 # text / emoji embeddings (shared latent)
 open-clip-torch>=2.24      # CLIP embeddings + theme-fidelity scoring
 torch-fidelity>=0.3        # FID / KID
+lpips>=0.1.4               # VAE perceptual loss (sharper reconstructions)
 
 # Note: the crowd simulator (data/crowd_simulator.py) is pure standard-library
 # and needs none of the above — it runs on any Python 3.9+.
