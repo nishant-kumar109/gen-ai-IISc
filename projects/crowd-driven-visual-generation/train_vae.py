@@ -166,7 +166,7 @@ def main() -> None:
                         "loss/recon": parts["recon"].item(),
                         "loss/kl": parts["kl"].item(),
                         "grad_norm": float(grad_norm),
-                        "lr": opt.param_groups[0]["lr"]}
+                        "learning_rate": opt.param_groups[0]["lr"]}
                 if lpips_fn is not None:
                     logd["loss/lpips"] = parts["lpips"].item()
                 wb.log(logd, step=step)
