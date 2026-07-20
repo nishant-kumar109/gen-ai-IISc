@@ -59,8 +59,16 @@ Shape self-test: `python3 models/diffusion.py` (6.91M params).
 > Trained end-to-end by **`train_diffusion.py`** + **`notebooks/02_train_diffusion.ipynb`**
 > (freezes the VAE, pre-encodes latents + CLIP conds, scales latents, trains with CFG).
 
+## ✅ Stage 3 — crowd → image (implemented, inference)
+**`sample_crowd.py`** + **`notebooks/03_crowd_to_image.ipynb`**: crowd → CLIP text
+embeddings → `aggregate()` → guided DDIM sampling → VAE decode. Two study modes:
+`themes` (does each theme render?) and `diversity` (RQ1 punchline: mean-pool → mush,
+centroid → stays coherent as off-theme noise rises). Non-learnable aggregators only;
+the learnable ones (DeepSets / attention) still need a short training pass.
+
 ## Still to build
 - `gan.py` — conditional GAN baseline.
-- Stage 3 — crowd aggregation → guided sampling (turn a crowd into an image).
+- Train the **learnable** aggregators (DeepSets / attention) and add to the RQ1 study.
+- Quantitative evaluation — theme-fidelity (CLIP) + coherence per aggregator × diversity.
 
 Configs + fixed seeds live alongside each module for reproducibility.
