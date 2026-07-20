@@ -86,10 +86,20 @@ def crowd_embeddings(sim, enc, theme, n, diversity):
     return embs, crowd
 
 
-def aggregate_cond(agg, embs):
-    """Aggregate a crowd's embeddings → one L2-normalised condition vector."""
+def aggregate_cond(agg, embs, gap=None, gap_scale=1.0):
+    """Aggregate a crowd's embeddings → one L2-normalised condition vector.
+
+    If ``gap`` (a modality-gap vector from compute_gap.py) is given, translate the
+    text condition toward the image manifold the diffusion model expects:
+    ``cond = normalize(aggregate(text) + gap_scale · gap)``.
+    """
     kw = {"k": 4, "mode": "dominant"} if agg == "centroid" else {}
-    return aggregate(agg, embs, **kw)                    # [D], already L2-normalised
+    cond = aggregate(agg, embs, **kw)                    # [D], L2-normalised (text space)
+    if gap is not None:
+        import numpy as np
+        v = np.asarray(cond, dtype="float32") + gap_scale * gap
+        cond = (v / (float(np.linalg.norm(v)) + 1e-8)).tolist()
+    return cond
 
 
 def save_labeled_grid(images, row_labels, col_labels, path, suptitle=None):
@@ -143,6 +153,11 @@ def main() -> None:
     p.add_argument("--guidance", type=float, default=3.0, help="CFG scale w")
     p.add_argument("--steps", type=int, default=50, help="DDIM steps")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--gap-file", default=None,
+                   help="modality-gap vector from compute_gap.py (translates text "
+                        "conditions toward the image manifold — fixes weak theme control)")
+    p.add_argument("--gap-scale", type=float, default=1.0,
+                   help="strength of the gap correction (0 = off, 1 = full)")
     p.add_argument("--fake-clip", action="store_true", help="HashingEncoder (local test)")
     p.add_argument("--out", default="runs/diffusion/crowd.png")
     p.add_argument("--device", default="auto")
@@ -158,6 +173,13 @@ def main() -> None:
     enc = build_encoder(dcfg, device, args.fake_clip)
     sim = CrowdSimulator(seed=args.seed)
     aggregators = [a.strip() for a in args.aggregators.split(",")]
+
+    gap = None
+    if args.gap_file:
+        gd = torch.load(args.gap_file, map_location="cpu", weights_only=False)
+        gap = gd["gap"].numpy()
+        print(f"modality-gap correction ON (‖gap‖={gd.get('gap_norm', 0):.3f}, "
+              f"scale={args.gap_scale})")
 
     # build the (row=aggregator × col) grid spec
     if args.mode == "themes":
@@ -182,7 +204,7 @@ def main() -> None:
         print(f"[{args.mode}:{col_labels[cidx]}] top responses: "
               f"{[w for w, _ in crowd.top(5)]}  (on-theme={crowd.on_theme_fraction():.0%})")
         for r, agg in enumerate(aggregators):
-            conds.append(aggregate_cond(agg, embs))
+            conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale))
             index.append((r, cidx))
 
     cond_batch = torch.tensor(conds, dtype=torch.float32, device=device)   # [M, D]
