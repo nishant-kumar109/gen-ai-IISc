@@ -80,14 +80,23 @@ if _HAS_TORCH:
             return self.op(F.interpolate(x, scale_factor=2, mode="nearest"))
 
     # ----------------------------------------------------------------------- #
-    # conditional U-Net (2 resolution levels — sized for an 8×8 latent)
+    # conditional U-Net (depth adapts to ch_mult; default fits a 16×16 latent)
     # ----------------------------------------------------------------------- #
     class ConditionalUNet(nn.Module):
+        """Predicts ε(x_t, t, c) in the VAE latent space.
+
+        One resolution level per ``ch_mult`` entry (``len-1`` down/up-samples).
+        Default ``(1, 2, 4)`` → 3 levels, sized for a **16×16** latent (16→8→4).
+        Time-step and condition are fused into one embedding and injected via
+        **FiLM**; a learned ``null_cond`` enables classifier-free guidance.
+        """
+
         def __init__(
             self,
             latent_channels: int = 4,
             base: int = 64,
             cond_dim: int = 512,
+            ch_mult: tuple[int, ...] = (1, 2, 4),
         ) -> None:
             super().__init__()
             emb_dim = base * 4
@@ -102,16 +111,27 @@ if _HAS_TORCH:
             self.null_cond = nn.Parameter(torch.randn(emb_dim) * 0.02)  # for CFG
 
             self.conv_in = nn.Conv2d(latent_channels, base, 3, padding=1)
-            # encoder
-            self.res_d0 = FiLMResBlock(base, base, emb_dim)          # 8×8, base
-            self.down0 = Downsample(base)                            # → 4×4
-            self.res_d1 = FiLMResBlock(base, base * 2, emb_dim)      # 4×4, 2·base
+            chans = [base * m for m in ch_mult]
+            L = len(chans)
+
+            # encoder: resblock (save skip) then downsample (except deepest)
+            self.enc = nn.ModuleList()
+            self.downs = nn.ModuleList()
+            cin = base
+            for i, c in enumerate(chans):
+                self.enc.append(FiLMResBlock(cin, c, emb_dim))
+                cin = c
+                self.downs.append(Downsample(c) if i < L - 1 else nn.Identity())
             # middle
-            self.res_m = FiLMResBlock(base * 2, base * 2, emb_dim)
-            # decoder (with skips)
-            self.res_u1 = FiLMResBlock(base * 2 + base * 2, base * 2, emb_dim)  # cat(m, d1)
-            self.up0 = Upsample(base * 2)                            # → 8×8
-            self.res_u0 = FiLMResBlock(base * 2 + base, base, emb_dim)          # cat(up, d0)
+            self.mid = FiLMResBlock(cin, cin, emb_dim)
+            # decoder: cat skip, resblock, then upsample (except shallowest)
+            self.dec = nn.ModuleList()
+            self.ups = nn.ModuleList()
+            prev = cin
+            for i in reversed(range(L)):
+                self.dec.append(FiLMResBlock(prev + chans[i], chans[i], emb_dim))
+                prev = chans[i]
+                self.ups.append(Upsample(chans[i]) if i > 0 else nn.Identity())
             self.out = nn.Sequential(
                 _norm(base), nn.SiLU(), nn.Conv2d(base, latent_channels, 3, padding=1)
             )
@@ -129,13 +149,16 @@ if _HAS_TORCH:
         def forward(self, x, t, cond, drop_mask=None, force_uncond=False):
             emb = self._embed(t, cond, drop_mask, force_uncond)
             h = self.conv_in(x)
-            d0 = self.res_d0(h, emb)                 # skip
-            d1 = self.res_d1(self.down0(d0), emb)    # skip
-            m = self.res_m(d1, emb)
-            u = self.res_u1(torch.cat([m, d1], 1), emb)
-            u = self.up0(u)
-            u = self.res_u0(torch.cat([u, d0], 1), emb)
-            return self.out(u)
+            skips = []
+            for res, down in zip(self.enc, self.downs):
+                h = res(h, emb)
+                skips.append(h)
+                h = down(h)
+            h = self.mid(h, emb)
+            for res, up, skip in zip(self.dec, self.ups, reversed(skips)):
+                h = res(torch.cat([h, skip], dim=1), emb)
+                h = up(h)
+            return self.out(h)
 
     # ----------------------------------------------------------------------- #
     # diffusion process
@@ -198,16 +221,16 @@ if _HAS_TORCH:
 
     def _demo() -> None:
         torch.manual_seed(0)
-        unet = ConditionalUNet(latent_channels=4, base=64, cond_dim=512)
+        unet = ConditionalUNet(latent_channels=4, base=64, cond_dim=512, ch_mult=(1, 2, 4))
         diff = GaussianDiffusion(unet, timesteps=1000)
-        x0 = torch.randn(2, 4, 8, 8)              # a fake latent batch
+        x0 = torch.randn(2, 4, 16, 16)           # a fake latent batch (16×16, from the VAE)
         cond = torch.randn(2, 512)               # a fake aggregated condition
         loss = diff.p_losses(x0, cond)
         n = sum(p.numel() for p in unet.parameters())
         print(f"U-Net params : {n/1e6:.2f}M")
         print(f"train loss    : {loss.item():.4f}  (ε-prediction MSE)")
-        samp = diff.ddim_sample((2, 4, 8, 8), cond, w=3.0, steps=8)
-        print(f"DDIM sample   : {tuple(samp.shape)}   (expect [2, 4, 8, 8])")
+        samp = diff.ddim_sample((2, 4, 16, 16), cond, w=3.0, steps=8)
+        print(f"DDIM sample   : {tuple(samp.shape)}   (expect [2, 4, 16, 16])")
 
 
 if __name__ == "__main__":
