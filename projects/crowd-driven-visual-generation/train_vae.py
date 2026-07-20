@@ -91,7 +91,10 @@ def main() -> None:
     if args.wandb:
         try:
             import wandb as wb
-            wb.init(project=args.wandb_project, name="vae", config=vars(args))
+            run_name = f"vae-b{args.beta:g}"
+            if args.perceptual > 0:
+                run_name += f"-lpips{args.perceptual:g}"
+            wb.init(project=args.wandb_project, name=run_name, config=vars(args))
         except Exception as e:
             print(f"[wandb] disabled: {e}")
             wb = None
