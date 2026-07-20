@@ -63,6 +63,11 @@ def main() -> None:
     p.add_argument("--beta", type=float, default=1.0, help="KL weight (β-VAE)")
     p.add_argument("--base", type=int, default=64)
     p.add_argument("--latent-channels", type=int, default=4)
+    p.add_argument("--ch-mult", default="1,2,4",
+                   help="channel multiplier per stage; #entries = #downsamples. "
+                        "'1,2,4' → 8× downsample (64→8, a [4,8,8] latent); "
+                        "'2,4' → 4× downsample (64→16, a [4,16,16] latent — 4× more "
+                        "capacity, much crisper reconstructions).")
     p.add_argument("--out", default="runs/vae")
     p.add_argument("--device", default="auto")
     p.add_argument("--workers", type=int, default=2)
@@ -85,7 +90,11 @@ def main() -> None:
 
     device = pick_device(args.device)
     os.makedirs(args.out, exist_ok=True)
+    ch_mult = tuple(int(m) for m in args.ch_mult.split(","))
+    latent_hw = args.image_size // (2 ** len(ch_mult))
     print(f"device={device}  dataset={args.dataset}  out={args.out}")
+    print(f"latent: [{args.latent_channels}, {latent_hw}, {latent_hw}] "
+          f"({args.image_size}→{latent_hw}, {2**len(ch_mult)}× downsample)")
 
     wb = None
     if args.wandb:
@@ -103,7 +112,7 @@ def main() -> None:
                          batch_size=args.batch, num_workers=args.workers,
                          limit=args.limit, image_col=args.image_col)
     vae = ConvVAE(latent_channels=args.latent_channels, base=args.base,
-                  beta=args.beta).to(device)
+                  ch_mult=ch_mult, beta=args.beta).to(device)
     opt = torch.optim.Adam(vae.parameters(), lr=args.lr)
     n_params = sum(p.numel() for p in vae.parameters())
     print(f"ConvVAE: {n_params/1e6:.2f}M params | batches/epoch={len(dl)}")
@@ -184,7 +193,8 @@ def main() -> None:
     ckpt = os.path.join(args.out, "vae.pt")
     torch.save({"model": vae.state_dict(),
                 "config": {"base": args.base, "latent_channels": args.latent_channels,
-                           "image_size": args.image_size, "beta": args.beta}},
+                           "ch_mult": list(ch_mult), "image_size": args.image_size,
+                           "latent_hw": latent_hw, "beta": args.beta}},
                ckpt)
     print(f"saved checkpoint → {ckpt}")
 
