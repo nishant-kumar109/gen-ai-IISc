@@ -74,6 +74,13 @@ def main() -> None:
                    help="log live reconstruction images every N epochs (wandb)")
     p.add_argument("--clip-grad", type=float, default=1.0,
                    help="max grad norm (0 = off); also logged as grad_norm")
+    p.add_argument("--perceptual", type=float, default=0.0,
+                   help="LPIPS perceptual-loss weight (0 = off). recon is a per-image "
+                        "sum (~300); LPIPS is a per-image distance (~0.2), so this "
+                        "weight bridges the scales — ~100-200 makes it a meaningful "
+                        "secondary term that sharpens edges without dominating pixels.")
+    p.add_argument("--lpips-net", default="vgg", choices=["vgg", "alex"],
+                   help="LPIPS backbone (vgg = LDM default, sharper; alex = faster)")
     args = p.parse_args()
 
     device = pick_device(args.device)
@@ -100,45 +107,70 @@ def main() -> None:
     if wb:
         wb.watch(vae, log="all", log_freq=100)   # weight & gradient histograms
 
+    # ---- optional LPIPS perceptual loss (frozen pretrained net) -------------- #
+    lpips_fn = None
+    if args.perceptual > 0:
+        import lpips as lpips_lib
+        lpips_fn = lpips_lib.LPIPS(net=args.lpips_net).to(device).eval()
+        for pp in lpips_fn.parameters():        # freeze — it's a fixed metric, not trained
+            pp.requires_grad_(False)
+        print(f"LPIPS[{args.lpips_net}] perceptual loss ON (weight={args.perceptual})")
+
     first_batch = None
     step = 0
     for epoch in range(args.epochs):
         vae.train()
         t0 = time.time()
         running = {"total": 0.0, "recon": 0.0, "kl": 0.0}
+        if lpips_fn is not None:
+            running["lpips"] = 0.0
         seen = 0
         for i, x in enumerate(dl):
             if first_batch is None:
                 first_batch = x
             x = x.to(device)
             x_rec, mu, logvar, _ = vae(x)
-            losses = vae.loss(x, x_rec, mu, logvar)
+            parts = vae.loss(x, x_rec, mu, logvar)   # total = recon + β·KL
+            loss = parts["total"]
+            if lpips_fn is not None:
+                # both x and x_rec are in [-1, 1] — exactly LPIPS's expected range
+                lp = lpips_fn(x_rec, x).mean()
+                loss = loss + args.perceptual * lp
+                parts["lpips"] = lp
+            parts["total"] = loss                    # log the combined objective
             opt.zero_grad()
-            losses["total"].backward()
+            loss.backward()
             if args.clip_grad > 0:
                 grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(), args.clip_grad)
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(), 1e9)  # measure only
             opt.step()
             for k in running:
-                running[k] += losses[k].item()
+                running[k] += parts[k].item()
             seen += 1
             step += 1
             if wb:
-                wb.log({"loss/total": losses["total"].item(),
-                        "loss/recon": losses["recon"].item(),
-                        "loss/kl": losses["kl"].item(),
+                logd = {"loss/total": parts["total"].item(),
+                        "loss/recon": parts["recon"].item(),
+                        "loss/kl": parts["kl"].item(),
                         "grad_norm": float(grad_norm),
-                        "lr": opt.param_groups[0]["lr"]}, step=step)
+                        "lr": opt.param_groups[0]["lr"]}
+                if lpips_fn is not None:
+                    logd["loss/lpips"] = parts["lpips"].item()
+                wb.log(logd, step=step)
             if args.steps and (i + 1) >= args.steps:
                 break
         avg = {k: v / max(seen, 1) for k, v in running.items()}
+        extra = f" lpips={avg['lpips']:.4f}" if "lpips" in avg else ""
         print(f"epoch {epoch+1:>3}/{args.epochs} | "
-              f"total={avg['total']:.2f} recon={avg['recon']:.2f} kl={avg['kl']:.2f} "
+              f"total={avg['total']:.2f} recon={avg['recon']:.2f} kl={avg['kl']:.2f}{extra} "
               f"| {time.time()-t0:.1f}s")
         if wb:
-            wb.log({"epoch/total": avg["total"], "epoch/recon": avg["recon"],
-                    "epoch/kl": avg["kl"], "epoch": epoch + 1}, step=step)
+            ep = {"epoch/total": avg["total"], "epoch/recon": avg["recon"],
+                  "epoch/kl": avg["kl"], "epoch": epoch + 1}
+            if "lpips" in avg:
+                ep["epoch/lpips"] = avg["lpips"]
+            wb.log(ep, step=step)
             if (epoch + 1) % args.sample_every == 0 and first_batch is not None:
                 live = save_reconstructions(
                     vae, first_batch, os.path.join(args.out, "recon_live.png"), device)
