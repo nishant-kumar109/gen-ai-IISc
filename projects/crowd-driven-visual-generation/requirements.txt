@@ -1,0 +1,23 @@
+# Crowd-Driven Visual Generation — dependencies
+# Training is intended to run on Colab / a CUDA (or Apple-MPS) box.
+# Recommended Python: 3.10–3.12 (PyTorch has no 3.14 wheels yet).
+
+# --- core ---
+torch>=2.2
+torchvision>=0.17
+numpy>=1.26
+pillow>=10.0
+scipy>=1.11
+scikit-learn>=1.4          # k-means for cluster-centroid aggregation
+einops>=0.7                # readable tensor ops in the U-Net / attention
+tqdm>=4.66
+pyyaml>=6.0
+matplotlib>=3.8
+
+# --- encoders + metrics ---
+sentence-transformers>=2.6 # text / emoji embeddings (shared latent)
+open-clip-torch>=2.24      # CLIP embeddings + theme-fidelity scoring
+torch-fidelity>=0.3        # FID / KID
+
+# Note: the crowd simulator (data/crowd_simulator.py) is pure standard-library
+# and needs none of the above — it runs on any Python 3.9+.
