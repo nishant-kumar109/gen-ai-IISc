@@ -70,6 +70,10 @@ def main() -> None:
     p.add_argument("--image-col", default="image", help="image column (HF datasets)")
     p.add_argument("--wandb", action="store_true", help="log to Weights & Biases")
     p.add_argument("--wandb-project", default="crowd-driven-visual-generation")
+    p.add_argument("--sample-every", type=int, default=5,
+                   help="log live reconstruction images every N epochs (wandb)")
+    p.add_argument("--clip-grad", type=float, default=1.0,
+                   help="max grad norm (0 = off); also logged as grad_norm")
     args = p.parse_args()
 
     device = pick_device(args.device)
@@ -93,6 +97,8 @@ def main() -> None:
     opt = torch.optim.Adam(vae.parameters(), lr=args.lr)
     n_params = sum(p.numel() for p in vae.parameters())
     print(f"ConvVAE: {n_params/1e6:.2f}M params | batches/epoch={len(dl)}")
+    if wb:
+        wb.watch(vae, log="all", log_freq=100)   # weight & gradient histograms
 
     first_batch = None
     step = 0
@@ -109,6 +115,10 @@ def main() -> None:
             losses = vae.loss(x, x_rec, mu, logvar)
             opt.zero_grad()
             losses["total"].backward()
+            if args.clip_grad > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(), args.clip_grad)
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(), 1e9)  # measure only
             opt.step()
             for k in running:
                 running[k] += losses[k].item()
@@ -117,13 +127,24 @@ def main() -> None:
             if wb:
                 wb.log({"loss/total": losses["total"].item(),
                         "loss/recon": losses["recon"].item(),
-                        "loss/kl": losses["kl"].item()}, step=step)
+                        "loss/kl": losses["kl"].item(),
+                        "grad_norm": float(grad_norm),
+                        "lr": opt.param_groups[0]["lr"]}, step=step)
             if args.steps and (i + 1) >= args.steps:
                 break
         avg = {k: v / max(seen, 1) for k, v in running.items()}
         print(f"epoch {epoch+1:>3}/{args.epochs} | "
               f"total={avg['total']:.2f} recon={avg['recon']:.2f} kl={avg['kl']:.2f} "
               f"| {time.time()-t0:.1f}s")
+        if wb:
+            wb.log({"epoch/total": avg["total"], "epoch/recon": avg["recon"],
+                    "epoch/kl": avg["kl"], "epoch": epoch + 1}, step=step)
+            if (epoch + 1) % args.sample_every == 0 and first_batch is not None:
+                live = save_reconstructions(
+                    vae, first_batch, os.path.join(args.out, "recon_live.png"), device)
+                if live:
+                    wb.log({"recon/live": wb.Image(live)}, step=step)
+                vae.train()   # save_reconstructions() left it in eval()
 
     ckpt = os.path.join(args.out, "vae.pt")
     torch.save({"model": vae.state_dict(),
