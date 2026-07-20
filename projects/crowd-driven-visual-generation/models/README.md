@@ -66,6 +66,11 @@ embeddings → `aggregate()` → guided DDIM sampling → VAE decode. Two study 
 centroid → stays coherent as off-theme noise rises). Non-learnable aggregators only;
 the learnable ones (DeepSets / attention) still need a short training pass.
 
+**Modality-gap correction** (`compute_gap.py`): the diffusion model trains on CLIP
+*image* embeddings but a crowd is CLIP *text* — different regions of CLIP space. We
+measure `gap = mean(image embs) − mean(text embs)` once and translate text conditions
+onto the image manifold (`sample_crowd.py --gap-file`). Fixes weak/OOD text conditioning.
+
 ## Still to build
 - `gan.py` — conditional GAN baseline.
 - Train the **learnable** aggregators (DeepSets / attention) and add to the RQ1 study.
