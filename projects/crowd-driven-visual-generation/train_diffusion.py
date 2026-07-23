@@ -75,6 +75,40 @@ def clip_embed(clip_model, x, device):
     return feats / feats.norm(dim=-1, keepdim=True)
 
 
+def clip_text_embed(clip_model, tokenizer, prompts, device):
+    """CLIP text embedding of a list of prompts → [len, D] unit vectors."""
+    tok = tokenizer(prompts).to(device)
+    f = clip_model.encode_text(tok)
+    return f / f.norm(dim=-1, keepdim=True)
+
+
+@torch.no_grad()
+def precompute_text(vae, clip_model, tokenizer, spec, image_size, limit, image_col,
+                    label_col, batch, device, keep_preview=8):
+    """Text-conditioned precompute: cache latents + per-image CLIP **image** and
+    **text**(label) embeddings, so training can mix the two condition types."""
+    from data.art_dataset import stream_with_labels
+
+    images, labels = stream_with_labels(spec, image_size, limit=limit,
+                                        image_col=image_col, label_col=label_col)
+    preview = images[:keep_preview].clone()
+    lats, img_conds = [], []
+    for i in range(0, len(images), batch):
+        xb = images[i:i + batch].to(device)
+        lats.append(vae.encode_to_latent(xb).cpu())
+        img_conds.append(clip_embed(clip_model, xb, device).cpu())
+    latents = torch.cat(lats)
+    image_conds = torch.cat(img_conds)
+    # embed each unique label once (as a text prompt), then map back per image
+    uniq = sorted(set(labels))
+    emb = clip_text_embed(clip_model, tokenizer, [f"a {s} painting" for s in uniq], device)
+    idx = {s: i for i, s in enumerate(uniq)}
+    text_conds = torch.stack([emb[idx[l]] for l in labels]).cpu()
+    print(f"  cached {len(latents)} latents + image/text conds "
+          f"({len(uniq)} unique labels)")
+    return latents, image_conds, text_conds, preview
+
+
 @torch.no_grad()
 def precompute(vae, clip_model, dl, device, fake_clip, keep_preview=8):
     """Encode the whole dataset once → (latents, conds). Returns preview images too."""
@@ -137,6 +171,13 @@ def main() -> None:
     p.add_argument("--sample-every", type=int, default=5, help="log samples every N epochs")
     p.add_argument("--clip-model", default="ViT-B-32")
     p.add_argument("--clip-pretrained", default="laion2b_s34b_b79k")
+    p.add_argument("--text-cond", action="store_true",
+                   help="ALSO condition on CLIP *text* embeddings of each image's label "
+                        "(bridges the modality gap so crowd text works at inference)")
+    p.add_argument("--p-text", type=float, default=0.5,
+                   help="fraction of steps conditioned on the text (vs image) embedding")
+    p.add_argument("--label-col", default="genre",
+                   help="dataset label column to embed as text (WikiArt: genre | style)")
     p.add_argument("--fake-clip", action="store_true",
                    help="skip CLIP, use random conds (local plumbing test only)")
     p.add_argument("--clip-grad", type=float, default=1.0, help="max grad norm (0 = off)")
@@ -162,7 +203,7 @@ def main() -> None:
     print(f"loaded VAE: latent [{lc}, {hw}, {hw}]  (frozen)")
 
     # ---- frozen CLIP (the conditioning encoder) ----
-    clip_model = None
+    clip_model, tokenizer = None, None
     if not args.fake_clip:
         import open_clip
         clip_model, _, _ = open_clip.create_model_and_transforms(
@@ -170,6 +211,7 @@ def main() -> None:
         clip_model = clip_model.to(device).eval()
         for pp in clip_model.parameters():
             pp.requires_grad_(False)
+        tokenizer = open_clip.get_tokenizer(args.clip_model)
         print(f"loaded CLIP {args.clip_model} ({args.clip_pretrained})")
 
     # ---- W&B ----
@@ -184,19 +226,37 @@ def main() -> None:
             wb = None
 
     # ---- pre-encode the dataset once (VAE + CLIP frozen) ----
-    dl = make_dataloader(args.dataset, image_size=args.image_size, batch_size=args.batch,
-                         shuffle=False, num_workers=args.workers,
-                         limit=args.limit, image_col=args.image_col)
     print("pre-encoding latents + conditions...")
-    latents, conds, preview = precompute(vae, clip_model, dl, device, args.fake_clip)
+    image_conds = text_conds = conds = None
+    if args.text_cond:
+        if args.fake_clip:                                   # local plumbing only
+            N = min(args.limit, 256)
+            latents = torch.randn(N, lc, hw, hw)
+            image_conds = torch.nn.functional.normalize(torch.randn(N, 512), dim=-1)
+            text_conds = torch.nn.functional.normalize(torch.randn(N, 512), dim=-1)
+            preview = torch.rand(8, 3, args.image_size, args.image_size) * 2 - 1
+        else:
+            latents, image_conds, text_conds, preview = precompute_text(
+                vae, clip_model, tokenizer, args.dataset, args.image_size, args.limit,
+                args.image_col, args.label_col, args.batch, device)
+        cond_dim = image_conds.shape[1]
+    else:
+        dl = make_dataloader(args.dataset, image_size=args.image_size, batch_size=args.batch,
+                             shuffle=False, num_workers=args.workers,
+                             limit=args.limit, image_col=args.image_col)
+        latents, conds, preview = precompute(vae, clip_model, dl, device, args.fake_clip)
+        cond_dim = conds.shape[1]
 
     # scale latents to ~unit std (DDPM assumption); save the scale for decoding
     scale = 1.0 / (latents.std().item() + 1e-8)
     latents = latents * scale
-    cond_dim = conds.shape[1]
-    print(f"latent scale={scale:.4f}  cond_dim={cond_dim}")
+    print(f"latent scale={scale:.4f}  cond_dim={cond_dim}"
+          + (f"  | text-cond mix p={args.p_text}" if args.text_cond else ""))
 
-    ds = torch.utils.data.TensorDataset(latents, conds)
+    if args.text_cond:
+        ds = torch.utils.data.TensorDataset(latents, image_conds, text_conds)
+    else:
+        ds = torch.utils.data.TensorDataset(latents, conds)
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch, shuffle=True,
                                          drop_last=True)
 
@@ -211,16 +271,24 @@ def main() -> None:
     if wb:
         wb.watch(unet, log="all", log_freq=100)
 
-    # a fixed set of conditions for consistent sample grids across epochs
+    # a fixed set of conditions for consistent sample grids across epochs.
+    # In text-cond mode, visualise from the *text* (label) embeddings — that's the
+    # capability we're adding, so the grid shows text-conditioned generation.
     n_prev = preview.shape[0]
-    fixed_conds = conds[:n_prev].clone()
+    fixed_conds = (text_conds if args.text_cond else conds)[:n_prev].clone()
 
     step = 0
     for epoch in range(args.epochs):
         unet.train()
         t0, running, seen = time.time(), 0.0, 0
-        for i, (z, c) in enumerate(loader):
-            z, c = z.to(device), c.to(device)
+        for i, batch in enumerate(loader):
+            if args.text_cond:
+                z, ic, tc = (b.to(device) for b in batch)
+                # per-sample coin flip: condition on text vs image embedding
+                use_text = (torch.rand(z.shape[0], device=device) < args.p_text)[:, None]
+                c = torch.where(use_text, tc, ic)
+            else:
+                z, c = batch[0].to(device), batch[1].to(device)
             loss = diffusion.p_losses(z, c)
             opt.zero_grad()
             loss.backward()
@@ -254,7 +322,9 @@ def main() -> None:
                            "timesteps": args.timesteps, "p_uncond": args.p_uncond,
                            "latent_scale": scale, "image_size": args.image_size,
                            "clip_model": args.clip_model,
-                           "clip_pretrained": args.clip_pretrained}},
+                           "clip_pretrained": args.clip_pretrained,
+                           "text_cond": args.text_cond, "p_text": args.p_text,
+                           "label_col": args.label_col}},
                ckpt)
     print(f"saved checkpoint → {ckpt}")
 
