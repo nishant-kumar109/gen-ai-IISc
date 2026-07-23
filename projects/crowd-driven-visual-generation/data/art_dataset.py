@@ -142,6 +142,51 @@ if _HAS_TORCH:
         print(f"  materialised {len(imgs)} images", flush=True)
         return _TensorDataset(torch.stack(imgs))
 
+    def stream_with_labels(spec, image_size, limit=15000, split="train",
+                           image_col="image", label_col="genre"):
+        """Stream a HuggingFace image dataset returning ``(images, label_names)``.
+
+        Used by the text-conditioned diffusion retrain: each image's categorical
+        label (WikiArt ``genre``/``style``) is resolved to its *name* so it can be
+        embedded by CLIP's text encoder. Returns a ``[N,3,H,W]`` tensor in [-1,1]
+        and a list of ``N`` label-name strings. Falls back to ``"artwork"`` if the
+        label column is missing.
+        """
+        from datasets import load_dataset
+
+        print(f"streaming {spec!r} with '{label_col}' labels — first {limit}...", flush=True)
+        try:
+            ds = load_dataset(spec, split=split, streaming=True, trust_remote_code=True)
+        except TypeError:
+            ds = load_dataset(spec, split=split, streaming=True)
+        feats = getattr(ds, "features", None)
+        names = None
+        if feats and label_col in feats and hasattr(feats[label_col], "names"):
+            names = feats[label_col].names
+        else:
+            avail = list(feats) if feats else "unknown"
+            print(f"  [WARN] label column {label_col!r} not a named ClassLabel "
+                  f"(available: {avail}). Labels will be raw values — text conditioning "
+                  f"will be weak. Try a different --label-col.", flush=True)
+        imgs, labels = [], []
+        for i, ex in enumerate(ds):
+            if i >= limit:
+                break
+            img = ex[image_col].convert("RGB").resize((image_size, image_size))
+            t = torch.frombuffer(img.tobytes(), dtype=torch.uint8).float()
+            imgs.append(t.view(image_size, image_size, 3).permute(2, 0, 1) / 255.0 * 2 - 1)
+            lab = ex.get(label_col)
+            if names is not None and isinstance(lab, int) and 0 <= lab < len(names):
+                labels.append(names[lab].replace("_", " "))
+            else:
+                labels.append(str(lab) if lab is not None else "artwork")
+        if not imgs:
+            raise RuntimeError(f"streamed 0 images from {spec!r}")
+        uniq = sorted(set(labels))
+        print(f"  {len(imgs)} images, {len(uniq)} unique '{label_col}' labels; "
+              f"examples: {uniq[:6]}", flush=True)
+        return torch.stack(imgs), labels
+
     # ------------------------------------------------------------------- #
     def get_dataset(spec: str = "synthetic", image_size: int = 64,
                     limit: int = 5000, image_col: str = "image", split: str = "train"):
