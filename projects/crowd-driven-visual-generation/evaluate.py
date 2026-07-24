@@ -26,7 +26,8 @@ import os
 import torch
 
 from data.crowd_simulator import THEMES, CrowdSimulator
-from sample_crowd import aggregate_cond, build_encoder, load_diffusion, load_vae
+from sample_crowd import (aggregate_cond, build_encoder, load_diffusion,
+                          load_learnable, load_vae)
 
 _CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 _CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
@@ -70,6 +71,8 @@ def main():
                    help="text prompt for theme-fidelity (CLIP target)")
     p.add_argument("--gap-file", default=None, help="optional modality-gap correction")
     p.add_argument("--gap-scale", type=float, default=1.0)
+    p.add_argument("--agg-ckpt", default=None,
+                   help="trained learnable aggregators (for deepsets/attention)")
     p.add_argument("--fake-clip", action="store_true")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default="runs/diffusion/rq1")
@@ -93,6 +96,7 @@ def main():
     gap = None
     if args.gap_file:
         gap = torch.load(args.gap_file, map_location="cpu", weights_only=False)["gap"].numpy()
+    learnable = load_learnable(args.agg_ckpt, device) if args.agg_ckpt else None
 
     # CLIP text embedding of each theme (the fidelity target)
     theme_txt = {}
@@ -109,7 +113,8 @@ def main():
                 for _ in range(args.repeats):
                     crowd = sim.sample(theme, n=args.n, diversity=div)
                     embs = enc.encode_texts([r.value for r in crowd.responses])
-                    conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale))
+                    conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale,
+                                                learnable=learnable))
                 cond_batch = torch.tensor(conds, dtype=torch.float32, device=device)
                 z = diff.ddim_sample((cond_batch.shape[0], lc, hw, hw), cond_batch,
                                      w=args.guidance, steps=args.steps)
