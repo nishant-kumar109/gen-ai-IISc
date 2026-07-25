@@ -26,8 +26,8 @@ import os
 import torch
 
 from data.crowd_simulator import THEMES, CrowdSimulator
-from sample_crowd import (aggregate_cond, build_encoder, load_diffusion,
-                          load_learnable, load_vae)
+from sample_crowd import (aggregate_cond, build_encoder, gen_latents,
+                          load_generative, load_learnable, load_vae)
 
 _CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 _CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
@@ -60,6 +60,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--vae", default="runs/vae/vae.pt")
     p.add_argument("--diffusion", default="runs/diffusion/diffusion.pt")
+    p.add_argument("--gan-ckpt", default=None,
+                   help="evaluate a GAN generator instead of diffusion (baseline compare)")
     p.add_argument("--aggregators", default="mean,centroid")
     p.add_argument("--themes", default=",".join(THEMES))
     p.add_argument("--diversities", default="0.1,0.4,0.7")
@@ -85,7 +87,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     vae, lc, hw = load_vae(args.vae, device)
-    diff, dcfg = load_diffusion(args.diffusion, device)
+    kind, model, dcfg = load_generative(args.diffusion, args.gan_ckpt, device)
     scale = dcfg["latent_scale"]
     enc = build_encoder(dcfg, device, args.fake_clip)
     sim = CrowdSimulator(seed=args.seed)
@@ -117,8 +119,8 @@ def main():
                     conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale,
                                                 learnable=learnable))
                 cond_batch = torch.tensor(conds, dtype=torch.float32, device=device)
-                z = diff.ddim_sample((cond_batch.shape[0], lc, hw, hw), cond_batch,
-                                     w=args.guidance, steps=args.steps)
+                z = gen_latents(kind, model, (cond_batch.shape[0], lc, hw, hw),
+                                cond_batch, args.guidance, args.steps)
                 imgs = vae.decode(z / scale).clamp(-1, 1)
                 ie = clip_image_embed(enc, imgs, device)              # [K, D] unit
                 fid_vals = (ie @ theme_txt[theme]).tolist()           # K per-image cosines
