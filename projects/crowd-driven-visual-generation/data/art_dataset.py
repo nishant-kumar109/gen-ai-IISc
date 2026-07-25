@@ -169,13 +169,17 @@ if _HAS_TORCH:
                   f"(available: {avail}). Labels will be raw values — text conditioning "
                   f"will be weak. Try a different --label-col.", flush=True)
         imgs, labels = [], []
+        t0 = time.time()
         for i, ex in enumerate(ds):
             if i >= limit:
                 break
             img = ex[image_col].convert("RGB").resize((image_size, image_size))
-            t = torch.frombuffer(img.tobytes(), dtype=torch.uint8).float()
+            t = torch.frombuffer(bytearray(img.tobytes()), dtype=torch.uint8).float()
             imgs.append(t.view(image_size, image_size, 3).permute(2, 0, 1) / 255.0 * 2 - 1)
             lab = ex.get(label_col)
+            if (i + 1) % 2000 == 0:
+                rate = (i + 1) / max(time.time() - t0, 1e-6)
+                print(f"  {i + 1}/{limit} images ({rate:.0f}/s)", flush=True)
             if names is not None and isinstance(lab, int) and 0 <= lab < len(names):
                 labels.append(names[lab].replace("_", " "))
             else:

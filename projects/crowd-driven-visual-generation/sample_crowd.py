@@ -86,15 +86,37 @@ def crowd_embeddings(sim, enc, theme, n, diversity):
     return embs, crowd
 
 
-def aggregate_cond(agg, embs, gap=None, gap_scale=1.0):
+def load_learnable(ckpt_path, device):
+    """Load trained learnable aggregators → {name: nn.Module}. See train_aggregators.py."""
+    from models.aggregation import AttentionPooling, DeepSets
+    d = torch.load(ckpt_path, map_location=device, weights_only=False)
+    cfg, out = d["config"], {}
+    if "deepsets" in d:
+        m = DeepSets.build(cfg["cond_dim"], cfg.get("hidden", 256), cfg["cond_dim"]).to(device)
+        m.load_state_dict(d["deepsets"]); m.eval(); out["deepsets"] = m
+    if "attention" in d:
+        m = AttentionPooling.build(cfg["cond_dim"], cfg["cond_dim"], cfg.get("heads", 4)).to(device)
+        m.load_state_dict(d["attention"]); m.eval(); out["attention"] = m
+    return out
+
+
+def aggregate_cond(agg, embs, gap=None, gap_scale=1.0, learnable=None):
     """Aggregate a crowd's embeddings → one L2-normalised condition vector.
 
-    If ``gap`` (a modality-gap vector from compute_gap.py) is given, translate the
-    text condition toward the image manifold the diffusion model expects:
-    ``cond = normalize(aggregate(text) + gap_scale · gap)``.
+    ``mean``/``centroid`` use the fixed heuristics; ``deepsets``/``attention`` use
+    the trained modules in ``learnable``. Optional ``gap`` (from compute_gap.py)
+    translates the text condition toward the image manifold.
     """
-    kw = {"k": 4, "mode": "dominant"} if agg == "centroid" else {}
-    cond = aggregate(agg, embs, **kw)                    # [D], L2-normalised (text space)
+    if learnable and agg in learnable:
+        import numpy as np
+        m = learnable[agg]
+        dev = next(m.parameters()).device
+        x = torch.tensor(np.asarray(embs, dtype="float32"), device=dev)[None]  # [1,N,D]
+        with torch.no_grad():
+            cond = m(x)[0].cpu().numpy().tolist()        # [D], unit-norm
+    else:
+        kw = {"k": 4, "mode": "dominant"} if agg == "centroid" else {}
+        cond = aggregate(agg, embs, **kw)                # [D], L2-normalised (text space)
     if gap is not None:
         import numpy as np
         v = np.asarray(cond, dtype="float32") + gap_scale * gap
@@ -158,6 +180,9 @@ def main() -> None:
                         "conditions toward the image manifold — fixes weak theme control)")
     p.add_argument("--gap-scale", type=float, default=1.0,
                    help="strength of the gap correction (0 = off, 1 = full)")
+    p.add_argument("--agg-ckpt", default=None,
+                   help="trained learnable aggregators (train_aggregators.py) — needed "
+                        "for --aggregators deepsets/attention")
     p.add_argument("--fake-clip", action="store_true", help="HashingEncoder (local test)")
     p.add_argument("--out", default="runs/diffusion/crowd.png")
     p.add_argument("--device", default="auto")
@@ -180,6 +205,7 @@ def main() -> None:
         gap = gd["gap"].numpy()
         print(f"modality-gap correction ON (‖gap‖={gd.get('gap_norm', 0):.3f}, "
               f"scale={args.gap_scale})")
+    learnable = load_learnable(args.agg_ckpt, device) if args.agg_ckpt else None
 
     # build the (row=aggregator × col) grid spec
     if args.mode == "themes":
@@ -204,7 +230,8 @@ def main() -> None:
         print(f"[{args.mode}:{col_labels[cidx]}] top responses: "
               f"{[w for w, _ in crowd.top(5)]}  (on-theme={crowd.on_theme_fraction():.0%})")
         for r, agg in enumerate(aggregators):
-            conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale))
+            conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale,
+                                        learnable=learnable))
             index.append((r, cidx))
 
     cond_batch = torch.tensor(conds, dtype=torch.float32, device=device)   # [M, D]

@@ -26,7 +26,8 @@ import os
 import torch
 
 from data.crowd_simulator import THEMES, CrowdSimulator
-from sample_crowd import aggregate_cond, build_encoder, load_diffusion, load_vae
+from sample_crowd import (aggregate_cond, build_encoder, load_diffusion,
+                          load_learnable, load_vae)
 
 _CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 _CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
@@ -62,7 +63,8 @@ def main():
     p.add_argument("--aggregators", default="mean,centroid")
     p.add_argument("--themes", default=",".join(THEMES))
     p.add_argument("--diversities", default="0.1,0.4,0.7")
-    p.add_argument("--repeats", type=int, default=8, help="independent crowds per cell")
+    p.add_argument("--repeats", type=int, default=24,
+                   help="independent crowds per cell (more = tighter error bars)")
     p.add_argument("--n", type=int, default=300, help="crowd size")
     p.add_argument("--guidance", type=float, default=3.0)
     p.add_argument("--steps", type=int, default=50)
@@ -70,6 +72,8 @@ def main():
                    help="text prompt for theme-fidelity (CLIP target)")
     p.add_argument("--gap-file", default=None, help="optional modality-gap correction")
     p.add_argument("--gap-scale", type=float, default=1.0)
+    p.add_argument("--agg-ckpt", default=None,
+                   help="trained learnable aggregators (for deepsets/attention)")
     p.add_argument("--fake-clip", action="store_true")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default="runs/diffusion/rq1")
@@ -93,6 +97,7 @@ def main():
     gap = None
     if args.gap_file:
         gap = torch.load(args.gap_file, map_location="cpu", weights_only=False)["gap"].numpy()
+    learnable = load_learnable(args.agg_ckpt, device) if args.agg_ckpt else None
 
     # CLIP text embedding of each theme (the fidelity target)
     theme_txt = {}
@@ -109,62 +114,80 @@ def main():
                 for _ in range(args.repeats):
                     crowd = sim.sample(theme, n=args.n, diversity=div)
                     embs = enc.encode_texts([r.value for r in crowd.responses])
-                    conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale))
+                    conds.append(aggregate_cond(agg, embs, gap=gap, gap_scale=args.gap_scale,
+                                                learnable=learnable))
                 cond_batch = torch.tensor(conds, dtype=torch.float32, device=device)
                 z = diff.ddim_sample((cond_batch.shape[0], lc, hw, hw), cond_batch,
                                      w=args.guidance, steps=args.steps)
                 imgs = vae.decode(z / scale).clamp(-1, 1)
                 ie = clip_image_embed(enc, imgs, device)              # [K, D] unit
-                fid = float((ie @ theme_txt[theme]).mean())           # cos, both unit
+                fid_vals = (ie @ theme_txt[theme]).tolist()           # K per-image cosines
                 K = ie.shape[0]
                 simm = ie @ ie.T                                      # [K, K] cosines
                 consistency = float((simm.sum() - K) / max(K * (K - 1), 1))
                 rows.append({"aggregator": agg, "theme": theme, "diversity": div,
-                             "theme_fidelity": fid, "consistency": consistency})
+                             "theme_fidelity": sum(fid_vals) / len(fid_vals),
+                             "fidelity_values": [float(v) for v in fid_vals],
+                             "consistency": consistency})
             print(f"{agg:>8} | div={div:<4} done ({len(themes)} themes × {args.repeats} crowds)")
 
-    # ---- summarise: average over themes → per (aggregator, diversity) ----
+    # ---- summarise: mean ± standard error, per (aggregator, diversity) ----
+    import statistics
+
+    def mean_se(xs):
+        m = sum(xs) / len(xs)
+        sd = statistics.pstdev(xs) if len(xs) > 1 else 0.0
+        return m, sd / (len(xs) ** 0.5)                              # standard error
+
     summary = {}
     for agg in aggregators:
         summary[agg] = {}
         for div in diversities:
             sel = [r for r in rows if r["aggregator"] == agg and r["diversity"] == div]
-            summary[agg][div] = {
-                "theme_fidelity": sum(r["theme_fidelity"] for r in sel) / len(sel),
-                "consistency": sum(r["consistency"] for r in sel) / len(sel),
-            }
+            fvals = [v for r in sel for v in r["fidelity_values"]]   # pooled repeats×themes
+            cvals = [r["consistency"] for r in sel]                  # per-theme
+            fm, fse = mean_se(fvals)
+            cm, cse = mean_se(cvals)
+            summary[agg][div] = {"theme_fidelity": fm, "theme_fidelity_se": fse,
+                                 "consistency": cm, "consistency_se": cse,
+                                 "n_fidelity": len(fvals)}
 
     json.dump({"rows": rows, "summary": summary, "config": vars(args)},
               open(os.path.join(args.out, "metrics.json"), "w"), indent=2)
 
-    # ---- print table ----
-    print("\n=== RQ1 summary (higher = better; averaged over themes) ===")
-    print(f"{'aggregator':>10} {'diversity':>10} {'fidelity':>10} {'consistency':>12}")
+    # ---- print table (mean ± SE) ----
+    print("\n=== RQ1 summary (higher = better; mean ± SE over samples) ===")
+    print(f"{'aggregator':>10} {'diversity':>10} {'fidelity':>18} {'consistency':>18}")
     for agg in aggregators:
         for div in diversities:
             s = summary[agg][div]
-            print(f"{agg:>10} {div:>10} {s['theme_fidelity']:>10.4f} {s['consistency']:>12.4f}")
+            print(f"{agg:>10} {div:>10} "
+                  f"{s['theme_fidelity']:>10.4f}±{s['theme_fidelity_se']:.4f} "
+                  f"{s['consistency']:>10.4f}±{s['consistency_se']:.4f}")
 
     # verdict at the highest diversity (robustness to noise)
     hi = max(diversities)
     if len(aggregators) >= 2:
         best = max(aggregators, key=lambda a: summary[a][hi]["theme_fidelity"])
+        s = summary[best][hi]
         print(f"\nAt diversity={hi} (noisiest crowd), highest theme-fidelity: "
-              f"**{best}** ({summary[best][hi]['theme_fidelity']:.4f}).")
+              f"**{best}** ({s['theme_fidelity']:.4f} ± {s['theme_fidelity_se']:.4f}).")
 
-    # ---- plots ----
+    # ---- plots (with SE error bars) ----
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         for metric, fname, ylab in [("theme_fidelity", "rq1_fidelity.png", "CLIP theme-fidelity"),
                                     ("consistency", "rq1_consistency.png", "output consistency")]:
-            plt.figure(figsize=(5, 3.5))
+            plt.figure(figsize=(5.2, 3.6))
             for agg in aggregators:
                 ys = [summary[agg][d][metric] for d in diversities]
-                plt.plot(diversities, ys, marker="o", label=agg)
+                es = [summary[agg][d][metric + "_se"] for d in diversities]
+                plt.errorbar(diversities, ys, yerr=es, marker="o", capsize=3, label=agg)
             plt.xlabel("crowd diversity (off-theme noise)"); plt.ylabel(ylab)
-            plt.title(f"RQ1: {ylab} vs diversity"); plt.legend(); plt.grid(alpha=0.3)
+            plt.title(f"RQ1: {ylab} vs diversity  (±SE)")
+            plt.legend(); plt.grid(alpha=0.3)
             plt.tight_layout(); plt.savefig(os.path.join(args.out, fname), dpi=130)
             plt.close()
         print(f"\nsaved metrics + plots → {args.out}/")

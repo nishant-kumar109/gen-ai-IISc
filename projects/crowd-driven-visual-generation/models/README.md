@@ -71,9 +71,14 @@ the learnable ones (DeepSets / attention) still need a short training pass.
 measure `gap = mean(image embs) − mean(text embs)` once and translate text conditions
 onto the image manifold (`sample_crowd.py --gap-file`). Fixes weak/OOD text conditioning.
 
+## ✅ Learnable aggregators (trained) — completes the 4-way RQ1 study
+**`train_aggregators.py`** + **`notebooks/05_train_aggregators.ipynb`**: train DeepSets + attention-PMA
+self-supervised — `loss = 1 - cos(agg(crowd_embeddings), CLIP_text("a {theme} scene"))` — to extract the
+dominant theme robustly. `sample_crowd.py`/`evaluate.py` load them via `--agg-ckpt` for a 4-way comparison
+(`mean · centroid · deepsets · attention`).
+
 ## Still to build
-- `gan.py` — conditional GAN baseline.
-- Train the **learnable** aggregators (DeepSets / attention) and add to the RQ1 study.
-- Quantitative evaluation — theme-fidelity (CLIP) + coherence per aggregator × diversity.
+- `gan.py` — conditional GAN baseline (optional).
+- Rigor: more eval repeats + error bars on the RQ1 plots.
 
 Configs + fixed seeds live alongside each module for reproducibility.
