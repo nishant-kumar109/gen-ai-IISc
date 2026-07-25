@@ -77,8 +77,13 @@ self-supervised — `loss = 1 - cos(agg(crowd_embeddings), CLIP_text("a {theme} 
 dominant theme robustly. `sample_crowd.py`/`evaluate.py` load them via `--agg-ckpt` for a 4-way comparison
 (`mean · centroid · deepsets · attention`).
 
-## Still to build
-- `gan.py` — conditional GAN baseline (optional).
-- Rigor: more eval repeats + error bars on the RQ1 plots.
+## ✅ `gan.py` (implemented) — conditional GAN baseline
+Conditional GAN in the same VAE latent space + CLIP conditioning (fair vs diffusion). `Generator`
+(noise ⊕ cond → latent) + projection `Discriminator`, hinge loss. Trained by **`train_gan.py`** +
+**`notebooks/07_train_gan.ipynb`**; `sample_crowd.py`/`evaluate.py` accept `--gan-ckpt` for the
+diffusion-vs-GAN comparison. Self-test: `python3 models/gan.py`.
+
+## Done
+Rigor (error bars + 24 repeats) and the qualitative v2 grids are in `evaluate.py` / `notebooks/06`.
 
 Configs + fixed seeds live alongside each module for reproducibility.

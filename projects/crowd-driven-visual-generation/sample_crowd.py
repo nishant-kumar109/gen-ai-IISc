@@ -69,6 +69,35 @@ def load_diffusion(path: str, device: str):
     return diff, c
 
 
+def load_generator(path, device):
+    """Load a trained conditional GAN Generator (train_gan.py)."""
+    from models.gan import Generator
+    d = torch.load(path, map_location=device, weights_only=False)
+    c = d["config"]
+    G = Generator(z_dim=c["z_dim"], cond_dim=c["cond_dim"],
+                  latent_channels=c["latent_channels"], hw=c["latent_hw"],
+                  base=c["base"]).to(device).eval()
+    G.load_state_dict(d["model"])
+    return G, c
+
+
+def load_generative(diffusion_ckpt, gan_ckpt, device):
+    """Pick the generator: GAN if ``gan_ckpt`` given, else diffusion. Returns
+    ``(kind, model, config)`` — both expose latents via ``gen_latents``."""
+    if gan_ckpt:
+        G, cfg = load_generator(gan_ckpt, device)
+        return "gan", G, cfg
+    diff, cfg = load_diffusion(diffusion_ckpt, device)
+    return "diffusion", diff, cfg
+
+
+def gen_latents(kind, model, shape, cond, w, steps):
+    """Sample latents from either model, given a conditioning batch."""
+    if kind == "gan":
+        return model.sample(cond)                         # G(noise, cond) → latent
+    return model.ddim_sample(shape, cond, w=w, steps=steps)
+
+
 def build_encoder(dcfg, device, fake_clip):
     """Return an encoder with ``encode_texts(list[str]) -> [N, D]`` (D = cond_dim)."""
     if fake_clip:
@@ -162,6 +191,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--vae", default="runs/vae/vae.pt")
     p.add_argument("--diffusion", default="runs/diffusion/diffusion.pt")
+    p.add_argument("--gan-ckpt", default=None,
+                   help="use a trained GAN generator (train_gan.py) instead of diffusion")
     p.add_argument("--mode", default="themes", choices=["themes", "diversity"])
     p.add_argument("--aggregators", default="mean,centroid",
                    help="comma list: mean,centroid (non-learnable)")
@@ -193,7 +224,7 @@ def main() -> None:
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     vae, lc, hw = load_vae(args.vae, device)
-    diff, dcfg = load_diffusion(args.diffusion, device)
+    kind, model, dcfg = load_generative(args.diffusion, args.gan_ckpt, device)
     scale = dcfg["latent_scale"]
     enc = build_encoder(dcfg, device, args.fake_clip)
     sim = CrowdSimulator(seed=args.seed)
@@ -236,9 +267,9 @@ def main() -> None:
 
     cond_batch = torch.tensor(conds, dtype=torch.float32, device=device)   # [M, D]
     print(f"sampling {len(conds)} conditions "
-          f"({len(aggregators)} aggregators × {len(cols)} cols) — DDIM {args.steps} steps...")
-    z = diff.ddim_sample((cond_batch.shape[0], lc, hw, hw), cond_batch,
-                         w=args.guidance, steps=args.steps)
+          f"({len(aggregators)} aggregators × {len(cols)} cols) — {kind}...")
+    z = gen_latents(kind, model, (cond_batch.shape[0], lc, hw, hw), cond_batch,
+                    args.guidance, args.steps)
     imgs = vae.decode(z / scale).clamp(-1, 1)                              # [M, 3, H, W]
 
     grid = [[None] * len(cols) for _ in aggregators]
