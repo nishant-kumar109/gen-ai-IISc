@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 748" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/>
+    </marker>
+    <style>
+      .box  { fill:#f3f4f6; stroke:#9ca3af; stroke-width:1.4; }
+      .hl   { fill:#dbeafe; stroke:#2563eb; stroke-width:1.8; }
+      .hl2  { fill:#dcfce7; stroke:#16a34a; stroke-width:1.6; }
+      .t    { fill:#111827; font-size:15px; font-weight:600; }
+      .s    { fill:#4b5563; font-size:11.5px; }
+      .lbl  { fill:#2563eb; font-size:10.5px; font-weight:700; }
+      .flow { stroke:#6b7280; stroke-width:1.6; }
+    </style>
+  </defs>
+
+  <!-- 1 Crowd -->
+  <rect class="box" x="60" y="16"  width="440" height="58" rx="10"/>
+  <text class="t" x="280" y="40" text-anchor="middle">Crowd</text>
+  <text class="s" x="280" y="60" text-anchor="middle">hundreds of responses · words · emojis · doodle labels</text>
+  <line class="flow" x1="280" y1="74"  x2="280" y2="104" marker-end="url(#arrow)"/>
+
+  <!-- 2 CLIP -->
+  <rect class="box" x="60" y="106" width="440" height="58" rx="10"/>
+  <text class="t" x="280" y="130" text-anchor="middle">CLIP text encoder (ViT-B/32)</text>
+  <text class="s" x="280" y="150" text-anchor="middle">each response &#8594; 512-d unit embedding &#8594; set of N vectors</text>
+  <line class="flow" x1="280" y1="164" x2="280" y2="194" marker-end="url(#arrow)"/>
+
+  <!-- 3 Aggregation (the study variable) -->
+  <rect class="hl" x="60" y="196" width="440" height="62" rx="10"/>
+  <text class="lbl" x="280" y="214" text-anchor="middle">THE STUDY VARIABLE (RQ1)</text>
+  <text class="t" x="280" y="234" text-anchor="middle">Permutation-invariant Aggregation</text>
+  <text class="s" x="280" y="252" text-anchor="middle">mean · cluster-centroid · Deep-Sets · attention-PMA</text>
+  <line class="flow" x1="280" y1="258" x2="280" y2="288" marker-end="url(#arrow)"/>
+
+  <!-- 4 Condition vector -->
+  <rect class="box" x="150" y="290" width="260" height="46" rx="10"/>
+  <text class="t" x="280" y="318" text-anchor="middle">Condition vector  c &#8712; &#8477;&#8309;&#185;&#178;</text>
+  <line class="flow" x1="280" y1="336" x2="280" y2="366" marker-end="url(#arrow)"/>
+
+  <!-- 5 Generator -->
+  <rect class="hl2" x="60" y="368" width="440" height="62" rx="10"/>
+  <text class="t" x="280" y="392" text-anchor="middle">Conditional generator — in the VAE latent space</text>
+  <text class="s" x="280" y="412" text-anchor="middle">Diffusion (FiLM U-Net + classifier-free guidance)  /  GAN (baseline)</text>
+  <line class="flow" x1="280" y1="430" x2="280" y2="460" marker-end="url(#arrow)"/>
+
+  <!-- 6 VAE decode -->
+  <rect class="box" x="150" y="462" width="260" height="46" rx="10"/>
+  <text class="t" x="280" y="490" text-anchor="middle">Frozen VAE decoder</text>
+  <line class="flow" x1="280" y1="508" x2="280" y2="538" marker-end="url(#arrow)"/>
+
+  <!-- 7 Image -->
+  <rect class="box" x="150" y="540" width="260" height="46" rx="10"/>
+  <text class="t" x="280" y="568" text-anchor="middle">Generated image</text>
+  <line class="flow" x1="280" y1="586" x2="280" y2="616" marker-end="url(#arrow)"/>
+
+  <!-- 8 Evaluation -->
+  <rect class="box" x="60" y="618" width="440" height="58" rx="10"/>
+  <text class="t" x="280" y="642" text-anchor="middle">Evaluation</text>
+  <text class="s" x="280" y="662" text-anchor="middle">CLIP theme-fidelity · output consistency  (per aggregator &#215; diversity)</text>
+
+  <!-- side note: aggregation is the only thing that changes -->
+  <text class="s" x="520" y="230" text-anchor="start" transform="rotate(90 520 230)" fill="#2563eb">swapped per experiment; all else frozen</text>
+</svg>
